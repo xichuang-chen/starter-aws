@@ -3,7 +3,7 @@ services:
   spring-backend:
     container_name: spring-backend
     build:
-      context: .
+      context: ./backend
     image: spring-backend
     ports:
     - "8080:8080"
@@ -26,3 +26,12 @@ services:
       KAFKA_ZOOKEEPER_CONNECT: zookeeper:2181
     volumes:
       - /Users/xichuang.chen/soft/docker/image-dir:/etc/mirro
+
+  nginx:
+    image: nginx
+    ports:
+      - "80:80"
+    volumes:
+      #    - ./nginx.conf:/etc/nginx/conf.d/default.conf
+      - ./frontend/build:/usr/share/nginx/html
+    command: /bin/bash -c "nginx -g 'daemon off;'"
