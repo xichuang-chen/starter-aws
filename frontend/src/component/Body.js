@@ -19,7 +19,7 @@ export default class Body extends Component {
             // body: JSON.stringify({ title: 'React POST Request Example' })
         };
         console.log("get data from backend");
-        const response = await fetch('http://localhost:8080/kafka/data', requestOptions);
+        const response = await fetch('http://localhost:80/kafka/data', requestOptions);
         console.log("response: ", response);
         const data = await response.json();
         console.log("data: ", data);

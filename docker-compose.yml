@@ -1,37 +1,60 @@
 version: '3'
+
+networks:
+  private_network:
+    driver: bridge
+  public_network:
+    driver: bridge
+
 services:
   spring-backend:
     container_name: spring-backend
     build:
       context: ./backend
     image: spring-backend
-    ports:
-    - "8080:8080"
     volumes:
-    - ./logs:/usr/local/logs/
+      - ./logs:/usr/local/logs/
+    networks:
+      - public_network
+      - private_network
+
   zookeeper:
     container_name: zookeeper
     image: wurstmeister/zookeeper
-    ports:
-      - "2181:2181"
+    networks:
+      - private_network
+
   kafka:
     container_name: kafka
     image: wurstmeister/kafka
     depends_on: [ zookeeper ]
-    ports:
-      - "9092:9092"
     environment:
       KAFKA_ADVERTISED_HOST_NAME: kafka
       KAFKA_CREATE_TOPICS: "test:1:1"
       KAFKA_ZOOKEEPER_CONNECT: zookeeper:2181
+      KAFKA_LOG_DIRS: /kafka/logs
     volumes:
-      - /Users/xichuang.chen/soft/docker/image-dir:/etc/mirro
+      - /Users/xichuang.chen/soft/docker/image-dir/kafka:/kafka/logs
+    networks:
+      - private_network
+
+  frontend:
+    container_name: frontend
+    build:
+      context: ./frontend
+    image: frontend
+    volumes:
+      - ./frontend/build:/app/build
+    networks:
+      - public_network
 
   nginx:
+    container_name: nginx
     image: nginx
     ports:
       - "80:80"
     volumes:
-      #    - ./nginx.conf:/etc/nginx/conf.d/default.conf
-      - ./frontend/build:/usr/share/nginx/html
+      - ./nginx/nginx.conf:/etc/nginx/conf.d/default.conf
     command: /bin/bash -c "nginx -g 'daemon off;'"
+    networks:
+      - public_network
