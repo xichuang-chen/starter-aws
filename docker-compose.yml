@@ -11,7 +11,6 @@ services:
     container_name: spring-backend
     build:
       context: ./backend
-    image: spring-backend
     volumes:
       - ./logs:/usr/local/logs/
     networks:
@@ -42,7 +41,6 @@ services:
     container_name: frontend
     build:
       context: ./frontend
-    image: frontend
     volumes:
       - ./frontend/build:/app/build
     networks:
