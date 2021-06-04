@@ -1,0 +1,22 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: Lambda function created by CloudFormation cxc.
+Resources:
+  primer:
+    Type: AWS::Lambda::Function
+    Properties:
+      Runtime: nodejs12.x
+      Role: arn:aws:iam::1600****7600:role/lambda-role
+      Handler: index.handler
+      Code:
+        ZipFile: |
+          exports.handler = async (event) => {
+              console.log("REQUEST RECEIVED:\n" + JSON.stringify(event))
+              const response = {
+                  statusCode: 200,
+                  body: JSON.stringify('Hello from CloudFormation lambda!'),
+              };
+              return response;
+          };
+      Description: response 200.
+      TracingConfig:
+        Mode: Active
