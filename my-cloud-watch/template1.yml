@@ -1,0 +1,189 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: lambda-cloudwatch-sns
+Parameters:
+  SourceS3BucketName:
+    Type: String
+    Default: src-s3-bucket-cxc
+  DestinationS3BucketName:
+    Type: String
+    Default: dest-s3-bucket-cxc
+
+Resources:
+  CXCRole:
+    Type: AWS::IAM::Role
+    DeletionPolicy: Delete
+    Properties:
+      Path: /
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Sid: AllowLambdaToAssumeRole
+            Action: sts:AssumeRole
+            Effect: Allow
+            Principal:
+              Service:
+                - 'lambda.amazonaws.com'
+      Policies:
+        - PolicyName: cxcS3Policy
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action: "s3:*"
+                Resource:
+                  -  !Sub "arn:aws:s3:::${SourceS3BucketName}"
+                  -  !Sub "arn:aws:s3:::${SourceS3BucketName}/*"
+                  -  !Sub "arn:aws:s3:::${DestinationS3BucketName}"
+                  -  !Sub "arn:aws:s3:::${DestinationS3BucketName}/*"
+      RoleName: "my-role-cxc"
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+        - arn:aws:iam::aws:policy/service-role/AWSLambdaVPCAccessExecutionRole
+
+  CXCLambda:
+    Type: AWS::Lambda::Function
+    DeletionPolicy: Delete
+    Properties:
+      FunctionName: my-lambda-cxc
+      Description: careate by cloudformation cxc
+      Handler: index.handler
+      Runtime: nodejs12.x
+      Code:
+        ZipFile: |
+          const AWS = require('aws-sdk');
+
+          const s3 = new AWS.S3({
+            region: 'ap-southeast-2',
+          });
+
+          exports.handler = async (event, context) => {
+            console.log("invoke the lambda function");
+            const sourceBucket = 'src-s3-bucket-cxc';
+            const destinationBucket = 'dest-s3-bucket-cxc';
+            const files = await s3
+              .listObjects({
+                Bucket: sourceBucket,
+              })
+              .promise();
+
+            console.log("files: ", files);
+            if (files.Contents.length <= 0) {
+              return new Error.message("There are not enough files");
+            }
+
+            return Promise.all(
+              files.Contents.map(async content => {
+                await s3
+                  .copyObject({
+                    Bucket: destinationBucket,
+                    CopySource: `/${sourceBucket}/${content.Key}`,
+                    Key: content.Key,
+                  })
+                  .promise();
+              })
+            );
+          };
+      Role: !GetAtt CXCRole.Arn
+
+
+  CXCSourceBucket:
+    Type: AWS::S3::Bucket
+    DeletionPolicy: Delete
+    Properties:
+      BucketName: !Ref SourceS3BucketName
+
+
+# 此处貌似只能定义一个桶的策略， 可以移到 IAM Role 来定义多个桶
+#  BucketPolicy:
+#    Type: AWS::S3::BucketPolicy
+#    Properties:
+#      PolicyDocument:
+#        "Version": "2008-10-17",
+#        "Statement": [
+#          {
+#            "Effect": "Allow",
+#            "Principal": {
+#              "AWS": !GetAtt CXCRole.Arn
+#            },
+#            "Action": "s3:*",
+#            "Resource": "arn:aws:s3:::src-s3-bucket-cxc/*"
+#          },
+#          {
+#            "Effect": "Allow",
+#            "Principal": {
+#              "AWS": !GetAtt CXCRole.Arn
+#            },
+#            "Action": "s3:*",
+#            "Resource": "arn:aws:s3:::src-s3-bucket-cxc"
+#          }
+#        ]
+#        Id: MyPolicy
+#      Bucket: !Ref CXCSourceBucket
+
+  CXCDestinationBucket:
+    Type: AWS::S3::Bucket
+    DeletionPolicy: Delete
+    Properties:
+      BucketName: !Ref DestinationS3BucketName
+
+  CXCLogGroup:
+    Type: AWS::Logs::LogGroup
+    DeletionPolicy: Delete
+    Properties:
+      LogGroupName: /aws/lambda/cxc/log
+      RetentionInDays: 7
+
+
+  CXCScheduledRule:
+    Type: AWS::Events::Rule
+    Properties:
+      Description: "CXCScheduledRule invoke lambda"
+      ScheduleExpression: "rate(1 minute)"
+      State: ENABLED
+      Targets:
+        - Arn:
+            Fn::GetAtt:
+              - "CXCLambda"
+              - "Arn"
+          Id: "TargetFunctionV1"
+  PermissionForEventsToInvokeLambda:
+    Type: AWS::Lambda::Permission
+    Properties:
+      FunctionName: !Ref CXCLambda
+      Action: "lambda:InvokeFunction"
+      Principal: "events.amazonaws.com"
+      SourceArn:
+        Fn::GetAtt:
+          - "CXCScheduledRule"
+          - "Arn"
+
+  ## Topic and Alarms
+  CXCAlarmTopic:
+    Type: AWS::SNS::Topic
+    DeletionPolicy: Delete
+    Properties:
+      DisplayName: CXC Alarm Topic
+      Subscription:
+        - Endpoint: "xichuang.chen@thoughtworks.com"
+          Protocol: email
+
+  CXCCloudWatchAlarm:
+    Type: AWS::CloudWatch::Alarm
+    DeletionPolicy: "Retain"
+    Properties:
+      AlarmDescription: "Alarm CXCLambda Exception"
+      Namespace: AWS/Lambda
+      MetricName: Errors
+      Dimensions:
+        - Name: FunctionName
+          Value: !Ref CXCLambda
+      Statistic: Sum
+      Period: 60
+      Threshold: 0
+      EvaluationPeriods: 1
+      ComparisonOperator: GreaterThanThreshold
+      AlarmActions:
+        - !Ref CXCAlarmTopic
+      OKActions:
+        - !Ref CXCAlarmTopic
+

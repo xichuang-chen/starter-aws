@@ -1,0 +1,152 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: my-sns-sqs-cxc
+
+Resources:
+  CXCRole:
+    Type: AWS::IAM::Role
+    DeletionPolicy: Delete
+    Properties:
+      Path: /
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Sid: AllowLambdaToAssumeRole
+            Action: sts:AssumeRole
+            Effect: Allow
+            Principal:
+              Service:
+                - 'lambda.amazonaws.com'
+      Policies:
+        - PolicyName: cxcRoot
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action: "*"
+                Resource: "*"
+
+      RoleName: "my-role-cxc"
+#      ManagedPolicyArns:
+#        - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+#        - arn:aws:iam::aws:policy/service-role/AWSLambdaVPCAccessExecutionRole
+
+  CXCLambda:
+    Type: AWS::Lambda::Function
+    DeletionPolicy: Delete
+    Properties:
+      FunctionName: my-lambda-cxc
+      Description: careate by cloudformation cxc
+      Role: !GetAtt CXCRole.Arn
+      Handler: index.handler
+      Runtime: nodejs12.x
+      Code:
+        ZipFile: |
+          exports.handler = async (event) => {
+            console.log('Received event:', JSON.stringify(event, null, 4));
+            var message = event.Records[0].Sns.Message;
+            console.log('Message received from SNS:', message);
+            const response = {
+                 statusCode: 200,
+                 body: JSON.stringify('Hello from Lambda!'),
+             };
+             return response;
+          };
+
+  LambdaFunctionEventSourceMapping:
+    Type: AWS::Lambda::EventSourceMapping
+    Properties:
+      BatchSize: 10
+      Enabled: true
+      EventSourceArn: !GetAtt CXCQueue.Arn
+      FunctionName: !GetAtt CXCLambda.Arn
+
+  CXCQueue:
+    Type: AWS::SQS::Queue
+    Properties:
+      QueueName: my-sqs-cxc
+      MessageRetentionPeriod: 259200
+      VisibilityTimeout: 30
+      RedrivePolicy:
+        deadLetterTargetArn:
+          Fn::GetAtt:
+            - "CXCDeadLetterQueue"
+            - "Arn"
+        maxReceiveCount: 5
+
+  CXCDeadLetterQueue:
+    Type: AWS::SQS::Queue
+    Properties:
+      QueueName: my-dead-letter-queue-cxc
+
+  ## Topic and Alarms
+  CXCAlarmTopic:
+    Type: AWS::SNS::Topic
+    DeletionPolicy: Delete
+    Properties:
+      DisplayName: CXC Alarm Topic
+      TopicName: my-sns-topic-cxc
+      Tags:
+        - Key: "owner"
+          Value: "cxc"
+      Subscription:
+        - Endpoint: "xichuang.chen@thoughtworks.com"
+          Protocol: email
+        - Endpoint:
+            Fn::GetAtt:
+              - "CXCLambda"
+              - "Arn"
+          Protocol: lambda
+        - Endpoint:
+            Fn::GetAtt:
+              - "CXCQueue"
+              - "Arn"
+          Protocol: sqs
+
+  CXCScheduledRule:
+    Type: AWS::Events::Rule
+    Properties:
+      Description: "CXCScheduledRule invoke sns topic"
+      ScheduleExpression: "rate(2 minutes)"
+      State: ENABLED
+      Targets:
+        - Arn:
+            Ref: "CXCAlarmTopic"
+          Id: "OpsTopic"
+
+  ## event invoke sns policy
+  CXCEventTopicPolicy:
+    Type: 'AWS::SNS::TopicPolicy'
+    Properties:
+      PolicyDocument:
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: events.amazonaws.com
+            Action: 'sns:Publish'
+            Resource: '*'
+      Topics:
+        - !Ref CXCAlarmTopic
+
+  PermissionForSNSToInvokeLambda:
+    Type: AWS::Lambda::Permission
+    Properties:
+      FunctionName: !Ref CXCLambda
+      Action: "lambda:InvokeFunction"
+      Principal: "sns.amazonaws.com"
+      SourceArn: !Ref "CXCAlarmTopic"
+
+
+  CXCSQSPolicy:
+    Type: AWS::SQS::QueuePolicy
+    Properties:
+      Queues: [{
+        "Ref": "CXCQueue"
+      }]
+      PolicyDocument:
+        Statement:
+          - Action:
+              - "SQS:SendMessage"
+              - "SQS:ReceiveMessage"
+            Effect: "Allow"
+            Resource: "*"
+            Principal: "*"
